@@ -3,8 +3,12 @@ name: Build Alethra AI APK
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: write   # diperlukan untuk membuat GitHub Release
 
 jobs:
   build:
@@ -45,3 +49,24 @@ jobs:
           name: Alethra-AI-debug
           path: Alethra-AI-debug.apk
           if-no-files-found: error
+
+      # Push ke main -> Release "latest" (selalu diperbarui dengan APK terbaru)
+      - name: Publish rolling release (latest)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --cleanup-tag --yes || true
+          gh release create latest Alethra-AI-debug.apk \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "Alethra AI - build terbaru" \
+            --notes "APK debug otomatis dari commit $GITHUB_SHA"
+
+      # Push tag v* (mis. v1.0.0) -> Release versi resmi
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" Alethra-AI-debug.apk \
+            --title "Alethra AI $GITHUB_REF_NAME" --generate-notes
