@@ -20,6 +20,7 @@ class AlethraApp : Application() {
         assistant = Assistant(
             db.dao(), LlamaEngine(store, prefs), WhisperEngine(store, prefs), TtsManager(this)
         )
+        assistant.tts.smooth = prefs.ttsSmooth
         transfers = TransferManager(this, store, prefs, assistant)
     }
 }

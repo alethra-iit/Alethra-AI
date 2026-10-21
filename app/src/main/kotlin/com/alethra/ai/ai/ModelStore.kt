@@ -35,6 +35,11 @@ class Prefs(ctx: Context) {
         get() = sp.getBoolean("auto_hands_free", false)
         set(v) = sp.edit().putBoolean("auto_hands_free", v).apply()
 
+    /** Kelancaran suara AI: 0 = Langsung (per beberapa kata), 1 = Seimbang, 2 = Mulus (menunggu lebih banyak teks). */
+    var ttsSmooth: Int
+        get() = sp.getInt("tts_smooth", 0)
+        set(v) = sp.edit().putInt("tts_smooth", v).apply()
+
     /** Mode bebas tangan: pengguna boleh memotong suara AI dengan berbicara. */
     var bargeIn: Boolean
         get() = sp.getBoolean("barge_in", true)

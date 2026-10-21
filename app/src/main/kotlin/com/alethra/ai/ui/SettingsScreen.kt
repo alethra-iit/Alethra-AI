@@ -52,6 +52,7 @@ fun SettingsScreen(onBack: () -> Unit, requestMic: (() -> Unit) -> Unit) {
     var sttList by remember { mutableStateOf(app.store.installed(ModelKind.STT)) }
     var picker by remember { mutableStateOf<ModelKind?>(null) }
     var speak by remember { mutableStateOf(app.prefs.speakReplies) }
+    var smooth by remember { mutableStateOf(app.prefs.ttsSmooth) }
     var autoHf by remember { mutableStateOf(app.prefs.autoHandsFree) }
     var barge by remember { mutableStateOf(app.prefs.bargeIn) }
     val floating by FloatingService.running.collectAsState()
@@ -222,6 +223,20 @@ fun SettingsScreen(onBack: () -> Unit, requestMic: (() -> Unit) -> Unit) {
             Section("Suara")
             SwitchRow("Bacakan jawaban otomatis", "Menggunakan Android Text-to-Speech", speak) {
                 speak = it; app.prefs.speakReplies = it
+            }
+
+            Text("Kelancaran suara", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                "Langsung: bicara per beberapa kata mengikuti tulisan AI, tanpa menunggu kalimat selesai (intonasi bisa kurang natural). Seimbang dan Mulus: menunggu lebih banyak teks dulu, suaranya lebih natural tapi mulai lebih lambat.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("Langsung", "Seimbang", "Mulus").forEachIndexed { i, label ->
+                    if (smooth == i) Button({}, Modifier.weight(1f)) { Text(label) }
+                    else OutlinedButton({
+                        smooth = i; app.prefs.ttsSmooth = i; app.assistant.tts.smooth = i
+                    }, Modifier.weight(1f)) { Text(label) }
+                }
             }
 
             Section("Floating assistant")

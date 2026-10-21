@@ -83,3 +83,10 @@ Nyalakan lewat ikon telinga di panel floating, atau Pengaturan → Floating assi
 - Tombol **Kecilkan** di panel menyisakan hanya lingkaran, tanpa kotak. Menyalakan mode bebas tangan dari panel otomatis mengecilkannya.
 - Saat pengguna atau AI berbicara, ikon berubah menjadi **mikrofon dengan gelombang** di sekelilingnya: warna utama = pengguna (gelombang mengikuti kerasnya suara), warna kedua = AI berbicara. Saat AI berpikir tampil indikator putar.
 - Ketuk lingkaran = buka panel, tahan lama = akhiri mode bebas tangan, seret = pindahkan. Parameter animasi ada di `Bubble`/`Waves` (`FloatingService.kt`).
+
+## Kelancaran suara
+Pengaturan → Suara → *Kelancaran suara*:
+- **Langsung** (bawaan): suara mengikuti tulisan AI per beberapa kata (3 kata untuk potongan pertama, 4 untuk berikutnya, atau lebih awal di tanda baca), tanpa menunggu kalimat selesai. Intonasi bisa kurang natural karena tiap potongan diucapkan terpisah. Jumlah kata ada di `findCutLive()` (`TtsManager.kt`).
+- **Seimbang / Mulus**: menunggu lebih banyak teks (min. potongan 50/40 dan 90/60 karakter) sehingga lebih natural tapi mulai lebih lambat.
+Bila AI menulis lebih lambat daripada kecepatan bicara, suara tetap menyusul tulisan dan bisa jeda sebentar di antara potongan.
+Bila *Potong suara AI* dimatikan, mikrofon mati total selama AI menjawab.

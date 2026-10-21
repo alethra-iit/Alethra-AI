@@ -244,18 +244,25 @@ class FloatingService : Service(), LifecycleOwner, SavedStateRegistryOwner, View
     /** Jalankan satu jawaban AI; kembalikan audio awal ucapan pengguna bila AI dipotong, selain itu null. */
     private suspend fun respondWithBargeIn(vs: VoiceSession, convId: Long, text: String, bargeIn: Boolean): FloatArray? {
         var pre: FloatArray? = null
-        coroutineScope {
-            val replyJob = launch {
-                assistant.ask(convId, text, true) { reply = it }
-                assistant.tts.awaitDone()
+        // Tanpa barge-in, mikrofon dimatikan total selama AI menjawab: rekaman + peredam gema yang berjalan
+        // bersamaan dengan pemutaran suara dapat mengganggu kelancaran suara di sebagian perangkat.
+        if (!bargeIn) vs.pause()
+        try {
+            coroutineScope {
+                val replyJob = launch {
+                    assistant.ask(convId, text, true) { reply = it }
+                    assistant.tts.awaitDone()
+                }
+                val bargeJob = if (!bargeIn) null else launch {
+                    // Ambang lebih tinggi saat suara AI keluar dari speaker, agar gemanya tidak memicu pemotongan.
+                    val p = vs.waitForBargeIn { if (assistant.tts.isSpeaking) 0.05f else 0.02f }
+                    if (p != null) { pre = p; replyJob.cancel() }
+                }
+                replyJob.join()
+                bargeJob?.cancel()
             }
-            val bargeJob = if (!bargeIn) null else launch {
-                // Ambang lebih tinggi saat suara AI keluar dari speaker, agar gemanya tidak memicu pemotongan.
-                val p = vs.waitForBargeIn { if (assistant.tts.isSpeaking) 0.05f else 0.02f }
-                if (p != null) { pre = p; replyJob.cancel() }
-            }
-            replyJob.join()
-            bargeJob?.cancel()
+        } finally {
+            if (!bargeIn) vs.resume()
         }
         return pre
     }

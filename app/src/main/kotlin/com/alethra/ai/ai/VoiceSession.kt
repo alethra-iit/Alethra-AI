@@ -55,6 +55,12 @@ class VoiceSession(private val onLevel: (Float) -> Unit = {}) : AutoCloseable {
         effects += e
     }
 
+    /** Hentikan rekaman sementara (mikrofon benar-benar mati), mis. saat AI berbicara tanpa barge-in. */
+    fun pause() { try { rec?.stop() } catch (_: Exception) {} }
+
+    /** Lanjutkan rekaman setelah [pause]. */
+    fun resume() { try { rec?.startRecording() } catch (_: Exception) {} }
+
     /** Buang audio lama yang menumpuk di buffer (mis. selama transkripsi atau sisa gema suara AI). */
     private fun drain() {
         val r = rec ?: return
