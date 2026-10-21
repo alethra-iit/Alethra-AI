@@ -46,7 +46,10 @@ Model yang baru selesai diunduh/diimpor otomatis menjadi model aktif; ganti kapa
   Model `.en` tidak mengenali bahasa Indonesia. Model fine-tune Indonesia menghasilkan teks huruf kecil tanpa tanda baca.
 - **Impor berkas** – salin file ke ponsel, lalu Pengaturan → *Impor berkas*; file ikut masuk daftar model.
 
-Unduhan bisa dilanjutkan jika terputus (selama sumbernya sama) dan bisa dibatalkan lewat tombol **Batalkan**.
+Unduhan/impor berjalan di **foreground service** (`DownloadService`) dengan notifikasi progres + tombol Batalkan, jadi tetap
+lanjut saat layar ditutup, aplikasi ke latar belakang, atau layar mati. Bisa dilanjutkan jika terputus (selama sumbernya sama)
+dan dibatalkan lewat tombol **Batalkan**. Unduhan juga bisa **dijeda/dilanjutkan** (tombol Jeda/Lanjutkan di aplikasi maupun di notifikasi);
+saat dijeda, sisa unduhan tersimpan dan aplikasi tidak lagi memakai jaringan/baterai untuk unduhan itu.
 Model lama dari versi 1.x otomatis dipindahkan ke daftar sebagai "Model terpasang sebelumnya".
 
 ## Tampilan

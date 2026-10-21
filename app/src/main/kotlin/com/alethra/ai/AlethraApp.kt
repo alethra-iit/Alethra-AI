@@ -10,6 +10,7 @@ class AlethraApp : Application() {
     lateinit var prefs: Prefs
     lateinit var store: ModelStore
     lateinit var assistant: Assistant
+    lateinit var transfers: TransferManager
 
     override fun onCreate() {
         super.onCreate()
@@ -19,5 +20,6 @@ class AlethraApp : Application() {
         assistant = Assistant(
             db.dao(), LlamaEngine(store, prefs), WhisperEngine(store, prefs), TtsManager(this)
         )
+        transfers = TransferManager(this, store, prefs, assistant)
     }
 }

@@ -2,6 +2,7 @@ package com.alethra.ai.ui
 
 import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -31,24 +32,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.alethra.ai.AlethraApp
 import com.alethra.ai.ai.Installed
 import com.alethra.ai.ai.ModelKind
-import com.alethra.ai.ai.Preset
+import com.alethra.ai.ai.TransferInfo
 import com.alethra.ai.overlay.FloatingService
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
-import java.io.File
 import java.util.Locale
-
-/** Status satu proses unduh/impor yang sedang berjalan untuk satu jenis model. */
-private class Transfer {
-    var progress by mutableStateOf<Float?>(null)
-    var job by mutableStateOf<Job?>(null)
-    var target by mutableStateOf<File?>(null)
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,67 +50,30 @@ fun SettingsScreen(onBack: () -> Unit, requestMic: (() -> Unit) -> Unit) {
 
     var llmList by remember { mutableStateOf(app.store.installed(ModelKind.LLM)) }
     var sttList by remember { mutableStateOf(app.store.installed(ModelKind.STT)) }
-    val llmT = remember { Transfer() }
-    val sttT = remember { Transfer() }
     var picker by remember { mutableStateOf<ModelKind?>(null) }
     var speak by remember { mutableStateOf(app.prefs.speakReplies) }
     val floating by FloatingService.running.collectAsState()
+
+    // Unduh/impor berjalan di TransferManager + DownloadService, jadi tetap lanjut walau layar ini
+    // ditutup atau aplikasi ke latar belakang. Layar ini hanya menampilkan statusnya.
+    val transfers by app.transfers.state.collectAsState()
+    val listVersion by app.transfers.version.collectAsState()
 
     fun refresh() {
         llmList = app.store.installed(ModelKind.LLM)
         sttList = app.store.installed(ModelKind.STT)
     }
-    fun transferOf(kind: ModelKind) = if (kind == ModelKind.LLM) llmT else sttT
+    LaunchedEffect(listVersion) { refresh() }
+
     suspend fun unload(kind: ModelKind) =
         if (kind == ModelKind.LLM) app.assistant.llama.unload() else app.assistant.whisper.unload()
 
-    /**
-     * Jalankan impor/unduh sebagai Job yang bisa dibatalkan. Bila sukses, model baru langsung
-     * menjadi model aktif. Progres & job dibersihkan di akhir, apa pun hasilnya.
-     */
-    fun start(kind: ModelKind, id: String, errorText: (Exception) -> String, block: suspend (File, (Float) -> Unit) -> Unit) {
-        val t = transferOf(kind)
-        if (t.job != null) return
-        val target = app.store.fileFor(kind, id)
-        t.target = target
-        val job = scope.launch {
-            t.progress = 0f
-            try {
-                // Hanya bongkar model dari memori bila berkas yang sama akan ditimpa.
-                if (app.store.activeFile(kind) == target) unload(kind)
-                block(target) { t.progress = it }
-                app.prefs.setActive(kind, id)
-                refresh()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Toast.makeText(ctx, errorText(e), Toast.LENGTH_LONG).show()
-            } finally {
-                t.progress = null
-                t.job = null
-            }
-        }
-        t.job = job
-    }
-
-    fun download(kind: ModelKind, p: Preset) = start(
-        kind, p.id, { "Unduhan terhenti: ${it.message}. Tekan Unduh lagi untuk melanjutkan." }
-    ) { target, onProgress -> app.store.download(p.url, target, onProgress) }
-
-    fun importFile(kind: ModelKind, uri: Uri) = start(
-        kind, app.store.customIdFor(uri), { it.message ?: "Gagal impor" }
-    ) { target, onProgress -> app.store.import(uri, target, onProgress) }
-
-    /** Batalkan proses, tunggu benar-benar berhenti, lalu buang berkas sementaranya. */
-    fun cancel(kind: ModelKind) {
-        val t = transferOf(kind)
-        val job = t.job ?: return
-        val target = t.target
-        scope.launch {
-            job.cancelAndJoin()
-            if (target != null) app.store.discardPartial(target)
-            Toast.makeText(ctx, "Proses dibatalkan", Toast.LENGTH_SHORT).show()
-        }
+    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    /** Android 13+: tanpa izin notifikasi, progres di latar belakang tidak terlihat (unduhan tetap jalan). */
+    fun askNotifPermission() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     fun select(kind: ModelKind, m: Installed) {
@@ -136,10 +90,10 @@ fun SettingsScreen(onBack: () -> Unit, requestMic: (() -> Unit) -> Unit) {
     }
 
     val pickLlm = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) importFile(ModelKind.LLM, uri)
+        if (uri != null) { askNotifPermission(); app.transfers.import(ModelKind.LLM, uri) }
     }
     val pickStt = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) importFile(ModelKind.STT, uri)
+        if (uri != null) { askNotifPermission(); app.transfers.import(ModelKind.STT, uri) }
     }
 
     picker?.let { kind ->
@@ -156,7 +110,10 @@ fun SettingsScreen(onBack: () -> Unit, requestMic: (() -> Unit) -> Unit) {
                                 picker = null
                                 if (have) {
                                     app.store.installed(kind).firstOrNull { it.id == p.id }?.let { select(kind, it) }
-                                } else download(kind, p)
+                                } else {
+                                    askNotifPermission()
+                                    app.transfers.download(kind, p)
+                                }
                             },
                             shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant
                         ) {
@@ -176,8 +133,6 @@ fun SettingsScreen(onBack: () -> Unit, requestMic: (() -> Unit) -> Unit) {
             dismissButton = { TextButton({ picker = null }) { Text("Batal") } }
         )
     }
-    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -217,24 +172,28 @@ fun SettingsScreen(onBack: () -> Unit, requestMic: (() -> Unit) -> Unit) {
                 hint = "Pasang beberapa model, lalu pilih satu yang dipakai. Unduh preset (Qwen2.5, Gemma 3, Llama 3.2) atau impor .gguf sendiri.",
                 models = llmList,
                 activeId = (llmList.firstOrNull { it.id == app.prefs.activeLlm } ?: llmList.firstOrNull())?.id,
-                progress = llmT.progress,
+                transfer = transfers[ModelKind.LLM],
                 onSelect = { select(ModelKind.LLM, it) },
                 onDelete = { delete(ModelKind.LLM, it) },
                 onDownload = { picker = ModelKind.LLM },
                 onPick = { pickLlm.launch(arrayOf("*/*")) },
-                onCancel = { cancel(ModelKind.LLM) }
+                onPause = { app.transfers.pause(ModelKind.LLM) },
+                onResume = { app.transfers.resume(ModelKind.LLM) },
+                onCancel = { app.transfers.cancel(ModelKind.LLM) }
             )
             ModelGroup(
                 title = "Model suara (Whisper)",
                 hint = "Pilih satu yang dipakai untuk mengubah suara ke teks. Model khusus Indonesia lebih akurat; atau impor berkas .bin (format GGML whisper.cpp) sendiri.",
                 models = sttList,
                 activeId = (sttList.firstOrNull { it.id == app.prefs.activeStt } ?: sttList.firstOrNull())?.id,
-                progress = sttT.progress,
+                transfer = transfers[ModelKind.STT],
                 onSelect = { select(ModelKind.STT, it) },
                 onDelete = { delete(ModelKind.STT, it) },
                 onDownload = { picker = ModelKind.STT },
                 onPick = { pickStt.launch(arrayOf("*/*")) },
-                onCancel = { cancel(ModelKind.STT) }
+                onPause = { app.transfers.pause(ModelKind.STT) },
+                onResume = { app.transfers.resume(ModelKind.STT) },
+                onCancel = { app.transfers.cancel(ModelKind.STT) }
             )
 
             Section("Data")
@@ -299,10 +258,12 @@ private fun formatSize(bytes: Long): String =
 @Composable
 private fun ModelGroup(
     title: String, hint: String,
-    models: List<Installed>, activeId: String?, progress: Float?,
+    models: List<Installed>, activeId: String?, transfer: TransferInfo?,
     onSelect: (Installed) -> Unit, onDelete: (Installed) -> Unit,
-    onDownload: () -> Unit, onPick: () -> Unit, onCancel: () -> Unit
+    onDownload: () -> Unit, onPick: () -> Unit,
+    onPause: () -> Unit, onResume: () -> Unit, onCancel: () -> Unit
 ) {
+    val progress = transfer?.progress
     var toDelete by remember { mutableStateOf<Installed?>(null) }
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -332,10 +293,26 @@ private fun ModelGroup(
                 }
             }
 
-            if (progress != null) {
-                LinearProgressIndicator(progress = { progress }, Modifier.fillMaxWidth())
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("${(progress * 100).toInt()}%", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+            if (transfer != null) {
+                LinearProgressIndicator(progress = { transfer.progress }, Modifier.fillMaxWidth())
+                Column {
+                    Text(
+                        "${(transfer.progress * 100).toInt()}%" + if (transfer.paused) " • Dijeda" else "",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        if (transfer.paused) "Sisa unduhan tersimpan; tekan Lanjutkan untuk meneruskan."
+                        else "Berjalan di latar belakang; aman ditinggal.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (transfer.paused) {
+                        Button(onResume) { Text("Lanjutkan") }
+                    } else if (transfer.canPause) {
+                        FilledTonalButton(onPause) { Text("Jeda") }
+                    }
                     OutlinedButton(
                         onCancel,
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
