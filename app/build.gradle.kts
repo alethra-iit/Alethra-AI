@@ -12,9 +12,20 @@ android {
         applicationId = "com.alethra.ai"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
+        // Naik otomatis di GitHub Actions supaya setiap build dianggap pembaruan.
+        versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
         versionName = "1.0.0"
         ndk { abiFilters += "arm64-v8a" }
+    }
+    // Kunci tetap: tanpa ini, tiap build di GitHub Actions memakai debug keystore acak yang
+    // berbeda-beda, sehingga Android menolak update ("bentrok" dengan aplikasi terpasang).
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("alethra-debug.keystore")
+            storePassword = "alethra-debug"
+            keyAlias = "alethra"
+            keyPassword = "alethra-debug"
+        }
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }

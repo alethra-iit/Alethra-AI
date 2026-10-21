@@ -23,6 +23,12 @@ gradle wrapper --gradle-version 8.9  # sekali saja, jika ingin ./gradlew
 Butuh JDK 17, Android SDK 34, NDK `27.2.12479018`, CMake `3.22.1`.
 APK: `app/build/outputs/apk/debug/app-debug.apk`.
 
+## Penandatanganan APK (penting untuk update)
+APK ditandatangani dengan kunci tetap `app/alethra-debug.keystore` (dan `versionCode` naik otomatis di CI), jadi build baru
+bisa langsung menimpa versi lama. **Jangan ganti/hapus berkas ini**, atau update akan "bentrok" lagi.
+Kunci ini sengaja dibuat untuk APK debug pribadi dan ikut ada di repo; untuk rilis publik, buat keystore sendiri
+dan simpan lewat GitHub Secrets.
+
 ## Build otomatis (GitHub Actions)
 Push ke `main` → workflow **Build Alethra AI APK** menghasilkan artifact **`Alethra-AI-debug.apk`**
 (Actions → run terbaru → Artifacts).
