@@ -15,7 +15,7 @@ class AlethraApp : Application() {
         super.onCreate()
         db = Room.databaseBuilder(this, AppDb::class.java, "alethra.db").build()
         prefs = Prefs(this)
-        store = ModelStore(this)
+        store = ModelStore(this, prefs)
         assistant = Assistant(
             db.dao(), LlamaEngine(store, prefs), WhisperEngine(store, prefs), TtsManager(this)
         )

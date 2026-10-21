@@ -12,17 +12,28 @@ import kotlin.math.sqrt
 
 class WhisperEngine(private val store: ModelStore, private val prefs: Prefs) {
     private var handle = 0L
+    private var loadedPath: String? = null
     private val lock = Mutex()
 
+    /** Memuat model suara yang sedang dipilih; bila pilihan berubah, model lama dibuang dulu. */
     suspend fun ensureLoaded(): Boolean = lock.withLock {
-        if (handle == 0L && store.hasStt()) {
-            handle = withContext(Dispatchers.Default) { WhisperBridge.load(store.sttFile.absolutePath) }
+        val file = store.activeFile(ModelKind.STT)
+        if (file == null) {
+            freeLocked()
+            return@withLock false
+        }
+        if (handle != 0L && loadedPath != file.absolutePath) freeLocked()
+        if (handle == 0L) {
+            handle = withContext(Dispatchers.Default) { WhisperBridge.load(file.absolutePath) }
+            if (handle != 0L) loadedPath = file.absolutePath
         }
         handle != 0L
     }
 
-    suspend fun unload() = lock.withLock {
-        if (handle != 0L) { WhisperBridge.free(handle); handle = 0L }
+    suspend fun unload() = lock.withLock { freeLocked() }
+
+    private fun freeLocked() {
+        if (handle != 0L) { WhisperBridge.free(handle); handle = 0L; loadedPath = null }
     }
 
     suspend fun transcribe(pcm: FloatArray, lang: String = "id"): String = lock.withLock {

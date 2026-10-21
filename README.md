@@ -27,13 +27,25 @@ APK: `app/build/outputs/apk/debug/app-debug.apk`.
 Push ke `main` → workflow **Build Alethra AI APK** menghasilkan artifact **`Alethra-AI-debug.apk`**
 (Actions → run terbaru → Artifacts).
 
-## Model (diimpor dari Pengaturan, disimpan di penyimpanan internal app)
-- **LLM (.gguf)** – rekomendasi untuk RAM 12 GB: `Qwen2.5-7B-Instruct-Q4_K_M` (~4,7 GB) atau `Gemma-3-4B-it-Q4_K_M`. Konteks 4096 token.
-- **Whisper** – `ggml-small.bin` (~470 MB, multibahasa; model `.en` tidak mengenali bahasa Indonesia).
+## Model (unduh atau impor dari Pengaturan, disimpan di penyimpanan internal app)
+Boleh memasang **beberapa** model untuk tiap jenis, lalu pilih satu yang dipakai (tombol radio di Pengaturan).
+Model yang baru selesai diunduh/diimpor otomatis menjadi model aktif; ganti kapan saja tanpa unduh ulang.
 
-Salin file ke ponsel, lalu Pengaturan → *Impor berkas*.
+- **LLM (.gguf)** – preset: `Qwen2.5-7B-Instruct-Q4_K_M` (~4,7 GB, rekomendasi untuk RAM 12 GB), Gemma 3 4B / 12B, Llama 3.2 3B. Konteks 4096 token.
+- **Suara (GGML untuk whisper.cpp)** – preset:
+  - `Whisper Small • Indonesia` (maleo-ai, ~264 MB) – rekomendasi.
+  - `Whisper Medium • Indonesia` (turunan `cahya/whisper-medium-id`, ~514 MB) – paling akurat, paling berat.
+  - `Whisper Tiny • Indonesia` (~43 MB) – paling ringan.
+  - `Whisper Small • Multibahasa` (~470 MB, OpenAI) – untuk bahasa selain Indonesia.
+  Model `.en` tidak mengenali bahasa Indonesia. Model fine-tune Indonesia menghasilkan teks huruf kecil tanpa tanda baca.
+- **Impor berkas** – salin file ke ponsel, lalu Pengaturan → *Impor berkas*; file ikut masuk daftar model.
 
-Atau tekan **Unduh** di Pengaturan (butuh internet hanya untuk mengunduh; setelah itu 100% offline; unduhan bisa dilanjutkan jika terputus). Sumber: `bartowski/Qwen2.5-7B-Instruct-GGUF` dan `ggerganov/whisper.cpp` di Hugging Face.
+Unduhan bisa dilanjutkan jika terputus (selama sumbernya sama) dan bisa dibatalkan lewat tombol **Batalkan**.
+Model lama dari versi 1.x otomatis dipindahkan ke daftar sebagai "Model terpasang sebelumnya".
+
+## Tampilan
+Pengaturan → **Tampilan**: pilih mode (ikuti sistem / terang / gelap) dan palet warna (Ungu, Samudra, Hutan, Senja, Mawar, Grafit).
+Pilihan disimpan dan juga berlaku untuk floating assistant. Palet ditambah/diubah di `ui/Theme.kt` (daftar `Palettes`).
 
 ## Floating assistant
 Pengaturan → aktifkan. Perlu izin: tampil di atas aplikasi lain, mikrofon, notifikasi.

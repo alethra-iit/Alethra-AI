@@ -42,8 +42,6 @@ import com.alethra.ai.AlethraApp
 import com.alethra.ai.ai.Status
 import com.alethra.ai.ui.AlethraTheme
 import com.alethra.ai.ui.MainActivity
-import com.alethra.ai.ui.Teal
-import com.alethra.ai.ui.Violet
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -194,7 +192,7 @@ class FloatingService : Service(), LifecycleOwner, SavedStateRegistryOwner, View
             Modifier.size(58.dp)
                 .shadow(8.dp, CircleShape)
                 .clip(CircleShape)
-                .background(Brush.linearGradient(listOf(Violet, Teal)))
+                .background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary)))
                 .pointerInput(Unit) {
                     detectDragGestures { change, drag ->
                         change.consume()

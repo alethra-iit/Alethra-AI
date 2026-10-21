@@ -50,7 +50,15 @@ fun ChatScreen(vm: ChatViewModel, onSettings: () -> Unit, requestMic: (() -> Uni
         drawerState = drawer,
         drawerContent = {
             ModalDrawerSheet {
-                Text("Riwayat", Modifier.padding(20.dp), style = MaterialTheme.typography.titleLarge)
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Riwayat", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                    IconButton({ scope.launch { drawer.close() } }) {
+                        Icon(Icons.Default.Close, "Tutup riwayat")
+                    }
+                }
                 NavigationDrawerItem(
                     label = { Text("Percakapan baru") },
                     icon = { Icon(Icons.Default.Add, null) },
@@ -139,9 +147,9 @@ private fun statusLabel(s: Status) = when (s) {
 private fun EmptyState(modifier: Modifier, onPick: (String) -> Unit) {
     Column(modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
-            Modifier.size(84.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Violet, Teal))),
+            Modifier.size(84.dp).clip(CircleShape).background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary))),
             contentAlignment = Alignment.Center
-        ) { Icon(Icons.Default.AutoAwesome, null, Modifier.size(40.dp), tint = Color.White) }
+        ) { Icon(Icons.Default.AutoAwesome, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.onPrimary) }
         Spacer(Modifier.height(20.dp))
         Text("Halo, saya Alethra", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         Text("Asisten AI pribadi yang berjalan 100% offline di ponsel Anda.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp, bottom = 20.dp))

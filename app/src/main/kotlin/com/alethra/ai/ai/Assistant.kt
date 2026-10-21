@@ -34,7 +34,7 @@ class Assistant(
             if (pcm.isEmpty()) return ""
             status.value = Status.Transcribing
             if (!whisper.ensureLoaded()) {
-                error.value = "Model Whisper belum diimpor. Buka Pengaturan → Impor model suara."
+                error.value = "Belum ada model suara. Buka Pengaturan → Model suara untuk mengunduh atau mengimpor."
                 return ""
             }
             return whisper.transcribe(pcm, "id").replace(Regex("\\[[^\\]]*]|\\([^)]*\\)"), "").trim()
@@ -68,7 +68,7 @@ class Assistant(
         try {
             status.value = if (llama.isLoaded) Status.Thinking else Status.Loading
             if (!llama.ensureLoaded()) {
-                error.value = "Model AI belum diimpor. Buka Pengaturan → Impor model LLM (.gguf)."
+                error.value = "Belum ada model bahasa. Buka Pengaturan → Model bahasa untuk mengunduh atau mengimpor."
                 return ""
             }
             status.value = Status.Thinking

@@ -8,20 +8,47 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.alethra.ai.AlethraApp
+import com.alethra.ai.ai.Installed
+import com.alethra.ai.ai.ModelKind
+import com.alethra.ai.ai.Preset
 import com.alethra.ai.overlay.FloatingService
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
+import java.io.File
+import java.util.Locale
+
+/** Status satu proses unduh/impor yang sedang berjalan untuk satu jenis model. */
+private class Transfer {
+    var progress by mutableStateOf<Float?>(null)
+    var job by mutableStateOf<Job?>(null)
+    var target by mutableStateOf<File?>(null)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -30,51 +57,124 @@ fun SettingsScreen(onBack: () -> Unit, requestMic: (() -> Unit) -> Unit) {
     val app = ctx.applicationContext as AlethraApp
     val scope = rememberCoroutineScope()
 
-    var llmReady by remember { mutableStateOf(app.store.hasLlm()) }
-    var sttReady by remember { mutableStateOf(app.store.hasStt()) }
-    var llmProgress by remember { mutableStateOf<Float?>(null) }
-    var sttProgress by remember { mutableStateOf<Float?>(null) }
+    var llmList by remember { mutableStateOf(app.store.installed(ModelKind.LLM)) }
+    var sttList by remember { mutableStateOf(app.store.installed(ModelKind.STT)) }
+    val llmT = remember { Transfer() }
+    val sttT = remember { Transfer() }
+    var picker by remember { mutableStateOf<ModelKind?>(null) }
     var speak by remember { mutableStateOf(app.prefs.speakReplies) }
     val floating by FloatingService.running.collectAsState()
 
-    val pickLlm = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch {
-            llmProgress = 0f
+    fun refresh() {
+        llmList = app.store.installed(ModelKind.LLM)
+        sttList = app.store.installed(ModelKind.STT)
+    }
+    fun transferOf(kind: ModelKind) = if (kind == ModelKind.LLM) llmT else sttT
+    suspend fun unload(kind: ModelKind) =
+        if (kind == ModelKind.LLM) app.assistant.llama.unload() else app.assistant.whisper.unload()
+
+    /**
+     * Jalankan impor/unduh sebagai Job yang bisa dibatalkan. Bila sukses, model baru langsung
+     * menjadi model aktif. Progres & job dibersihkan di akhir, apa pun hasilnya.
+     */
+    fun start(kind: ModelKind, id: String, errorText: (Exception) -> String, block: suspend (File, (Float) -> Unit) -> Unit) {
+        val t = transferOf(kind)
+        if (t.job != null) return
+        val target = app.store.fileFor(kind, id)
+        t.target = target
+        val job = scope.launch {
+            t.progress = 0f
             try {
-                app.assistant.llama.unload()
-                app.store.import(uri, app.store.llmFile) { llmProgress = it }
-                llmReady = true
+                // Hanya bongkar model dari memori bila berkas yang sama akan ditimpa.
+                if (app.store.activeFile(kind) == target) unload(kind)
+                block(target) { t.progress = it }
+                app.prefs.setActive(kind, id)
+                refresh()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                Toast.makeText(ctx, e.message ?: "Gagal impor", Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, errorText(e), Toast.LENGTH_LONG).show()
+            } finally {
+                t.progress = null
+                t.job = null
             }
-            llmProgress = null
         }
+        t.job = job
+    }
+
+    fun download(kind: ModelKind, p: Preset) = start(
+        kind, p.id, { "Unduhan terhenti: ${it.message}. Tekan Unduh lagi untuk melanjutkan." }
+    ) { target, onProgress -> app.store.download(p.url, target, onProgress) }
+
+    fun importFile(kind: ModelKind, uri: Uri) = start(
+        kind, app.store.customIdFor(uri), { it.message ?: "Gagal impor" }
+    ) { target, onProgress -> app.store.import(uri, target, onProgress) }
+
+    /** Batalkan proses, tunggu benar-benar berhenti, lalu buang berkas sementaranya. */
+    fun cancel(kind: ModelKind) {
+        val t = transferOf(kind)
+        val job = t.job ?: return
+        val target = t.target
+        scope.launch {
+            job.cancelAndJoin()
+            if (target != null) app.store.discardPartial(target)
+            Toast.makeText(ctx, "Proses dibatalkan", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun select(kind: ModelKind, m: Installed) {
+        app.prefs.setActive(kind, m.id)
+        scope.launch { unload(kind) } // bebaskan RAM; model baru dimuat saat dipakai
+    }
+
+    fun delete(kind: ModelKind, m: Installed) {
+        scope.launch {
+            unload(kind)
+            app.store.delete(m)
+            refresh()
+        }
+    }
+
+    val pickLlm = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) importFile(ModelKind.LLM, uri)
     }
     val pickStt = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch {
-            sttProgress = 0f
-            try {
-                app.assistant.whisper.unload()
-                app.store.import(uri, app.store.sttFile) { sttProgress = it }
-                sttReady = true
-            } catch (e: Exception) {
-                Toast.makeText(ctx, e.message ?: "Gagal impor", Toast.LENGTH_LONG).show()
-            }
-            sttProgress = null
-        }
+        if (uri != null) importFile(ModelKind.STT, uri)
     }
-    fun download(url: String, target: java.io.File, setP: (Float?) -> Unit, unload: suspend () -> Unit, done: () -> Unit) {
-        scope.launch {
-            setP(0f)
-            try {
-                unload()
-                app.store.download(url, target) { setP(it) }
-                done()
-            } catch (e: Exception) {
-                Toast.makeText(ctx, "Unduhan terhenti: ${e.message}. Tekan Unduh lagi untuk melanjutkan.", Toast.LENGTH_LONG).show()
-            }
-            setP(null)
-        }
+
+    picker?.let { kind ->
+        val installedIds = (if (kind == ModelKind.LLM) llmList else sttList).map { it.id }.toSet()
+        AlertDialog(
+            onDismissRequest = { picker = null },
+            title = { Text(if (kind == ModelKind.LLM) "Pilih model bahasa" else "Pilih model suara") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    app.store.presets(kind).forEach { p ->
+                        val have = p.id in installedIds
+                        Surface(
+                            onClick = {
+                                picker = null
+                                if (have) {
+                                    app.store.installed(kind).firstOrNull { it.id == p.id }?.let { select(kind, it) }
+                                } else download(kind, p)
+                            },
+                            shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                                Text("${p.name} • ${p.size}", style = MaterialTheme.typography.titleSmall)
+                                Text(p.desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (have) Text(
+                                    "✓ Sudah terpasang — ketuk untuk memakai",
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton({ picker = null }) { Text("Batal") } }
+        )
     }
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
@@ -92,37 +192,50 @@ fun SettingsScreen(onBack: () -> Unit, requestMic: (() -> Unit) -> Unit) {
             Modifier.padding(inner).padding(16.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            Section("Tampilan")
+            Text("Mode", style = MaterialTheme.typography.bodyMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("Ikuti sistem" to ThemeMode.SYSTEM, "Terang" to ThemeMode.LIGHT, "Gelap" to ThemeMode.DARK)
+                    .forEach { (label, mode) ->
+                        FilterChip(
+                            selected = app.prefs.themeMode == mode,
+                            onClick = { app.prefs.updateThemeMode(mode) },
+                            label = { Text(label) }
+                        )
+                    }
+            }
+            Text("Warna", style = MaterialTheme.typography.bodyMedium)
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Palettes.forEachIndexed { i, p ->
+                    PaletteSwatch(p, selected = app.prefs.paletteIndex == i) { app.prefs.updatePalette(i) }
+                }
+            }
+
             Section("Model AI (offline)")
-            ModelCard(
-                "Model bahasa (LLM)", "Qwen2.5-7B-Instruct Q4_K_M (±4,7 GB). Unduh langsung atau impor .gguf lain.",
-                llmReady, llmProgress,
-                onDelete = {
-                    scope.launch {
-                        app.assistant.llama.unload()
-                        app.store.delete(app.store.llmFile)
-                        llmReady = false
-                    }
-                },
-                onDownload = {
-                    download(com.alethra.ai.ai.ModelStore.LLM_URL, app.store.llmFile, { llmProgress = it },
-                        { app.assistant.llama.unload() }, { llmReady = true })
-                }
-            ) { pickLlm.launch(arrayOf("*/*")) }
-            ModelCard(
-                "Model suara (Whisper)", "ggml-small multibahasa (±470 MB). Unduh langsung atau impor berkas sendiri.",
-                sttReady, sttProgress,
-                onDelete = {
-                    scope.launch {
-                        app.assistant.whisper.unload()
-                        app.store.delete(app.store.sttFile)
-                        sttReady = false
-                    }
-                },
-                onDownload = {
-                    download(com.alethra.ai.ai.ModelStore.STT_URL, app.store.sttFile, { sttProgress = it },
-                        { app.assistant.whisper.unload() }, { sttReady = true })
-                }
-            ) { pickStt.launch(arrayOf("*/*")) }
+            ModelGroup(
+                title = "Model bahasa (LLM)",
+                hint = "Pasang beberapa model, lalu pilih satu yang dipakai. Unduh preset (Qwen2.5, Gemma 3, Llama 3.2) atau impor .gguf sendiri.",
+                models = llmList,
+                activeId = (llmList.firstOrNull { it.id == app.prefs.activeLlm } ?: llmList.firstOrNull())?.id,
+                progress = llmT.progress,
+                onSelect = { select(ModelKind.LLM, it) },
+                onDelete = { delete(ModelKind.LLM, it) },
+                onDownload = { picker = ModelKind.LLM },
+                onPick = { pickLlm.launch(arrayOf("*/*")) },
+                onCancel = { cancel(ModelKind.LLM) }
+            )
+            ModelGroup(
+                title = "Model suara (Whisper)",
+                hint = "Pilih satu yang dipakai untuk mengubah suara ke teks. Model khusus Indonesia lebih akurat; atau impor berkas .bin (format GGML whisper.cpp) sendiri.",
+                models = sttList,
+                activeId = (sttList.firstOrNull { it.id == app.prefs.activeStt } ?: sttList.firstOrNull())?.id,
+                progress = sttT.progress,
+                onSelect = { select(ModelKind.STT, it) },
+                onDelete = { delete(ModelKind.STT, it) },
+                onDownload = { picker = ModelKind.STT },
+                onPick = { pickStt.launch(arrayOf("*/*")) },
+                onCancel = { cancel(ModelKind.STT) }
+            )
 
             Section("Data")
             var confirmAll by remember { mutableStateOf(false) }
@@ -179,37 +292,96 @@ fun SettingsScreen(onBack: () -> Unit, requestMic: (() -> Unit) -> Unit) {
 @Composable private fun Section(t: String) =
     Text(t, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
 
+private fun formatSize(bytes: Long): String =
+    if (bytes >= 1L shl 30) String.format(Locale("id", "ID"), "%.1f GB", bytes / (1L shl 30).toDouble())
+    else String.format(Locale("id", "ID"), "%d MB", bytes shr 20)
+
 @Composable
-private fun ModelCard(title: String, hint: String, ready: Boolean, progress: Float?, onDelete: () -> Unit, onDownload: () -> Unit, onPick: () -> Unit) {
+private fun ModelGroup(
+    title: String, hint: String,
+    models: List<Installed>, activeId: String?, progress: Float?,
+    onSelect: (Installed) -> Unit, onDelete: (Installed) -> Unit,
+    onDownload: () -> Unit, onPick: () -> Unit, onCancel: () -> Unit
+) {
+    var toDelete by remember { mutableStateOf<Installed?>(null) }
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(
-                if (ready) "✓ Terpasang" else "Belum dipasang",
-                color = if (ready) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error
-            )
+
+            if (models.isEmpty()) {
+                Text("Belum ada model terpasang", color = MaterialTheme.colorScheme.error)
+            } else models.forEach { m ->
+                val active = m.id == activeId
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(enabled = progress == null) { onSelect(m) },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(selected = active, onClick = null, Modifier.padding(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(m.name, style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            formatSize(m.bytes) + if (active) " • Sedang dipakai" else "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (active) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton({ toDelete = m }, enabled = progress == null) {
+                        Icon(Icons.Default.Delete, "Hapus ${m.name}", tint = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+
             if (progress != null) {
                 LinearProgressIndicator(progress = { progress }, Modifier.fillMaxWidth())
-                Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${(progress * 100).toInt()}%", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                    OutlinedButton(
+                        onCancel,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Icon(Icons.Default.Close, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Batalkan")
+                    }
+                }
             } else Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onDownload) { Text(if (ready) "Unduh ulang" else "Unduh") }
+                Button(onDownload) { Text("Unduh model") }
                 OutlinedButton(onPick) { Text("Impor berkas") }
             }
-            if (progress == null && ready) {
-                var confirm by remember { mutableStateOf(false) }
-                TextButton({ confirm = true }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
-                    Text("Hapus model")
-                }
-                if (confirm) AlertDialog(
-                    onDismissRequest = { confirm = false },
-                    title = { Text("Hapus model?") },
-                    text = { Text("Berkas model akan dihapus dari perangkat. Anda bisa mengunduhnya lagi nanti.") },
-                    confirmButton = { TextButton({ confirm = false; onDelete() }) { Text("Hapus") } },
-                    dismissButton = { TextButton({ confirm = false }) { Text("Batal") } }
-                )
-            }
         }
+    }
+    toDelete?.let { m ->
+        AlertDialog(
+            onDismissRequest = { toDelete = null },
+            title = { Text("Hapus model?") },
+            text = { Text("“${m.name}” akan dihapus dari perangkat. Anda bisa mengunduhnya lagi nanti.") },
+            confirmButton = { TextButton({ toDelete = null; onDelete(m) }) { Text("Hapus") } },
+            dismissButton = { TextButton({ toDelete = null }) { Text("Batal") } }
+        )
+    }
+}
+
+@Composable
+private fun PaletteSwatch(p: AlethraPalette, selected: Boolean, onClick: () -> Unit) {
+    // Pratinjau mengikuti mode yang sedang aktif (terang/gelap).
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val cs = if (isDark) p.dark else p.light
+    Column(
+        Modifier.clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            Modifier.size(52.dp).clip(CircleShape)
+                .background(Brush.linearGradient(listOf(cs.primary, cs.secondary)))
+                .border(
+                    if (selected) 3.dp else 1.dp,
+                    if (selected) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.outlineVariant,
+                    CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) { if (selected) Icon(Icons.Default.Check, "Dipilih", tint = cs.onPrimary) }
+        Text(p.name, Modifier.padding(top = 4.dp), style = MaterialTheme.typography.labelSmall)
     }
 }
 

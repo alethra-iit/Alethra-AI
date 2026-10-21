@@ -10,24 +10,35 @@ import kotlinx.coroutines.sync.withLock
 
 class LlamaEngine(private val store: ModelStore, private val prefs: Prefs) {
     private var handle = 0L
+    private var loadedPath: String? = null
     private val loadLock = Mutex()
     private val runLock = Mutex()
 
     val isLoaded get() = handle != 0L
 
+    /** Memuat model yang sedang dipilih; bila pilihan berubah, model lama dibuang dulu. */
     suspend fun ensureLoaded(): Boolean = loadLock.withLock {
-        if (handle == 0L && store.hasLlm()) {
+        val file = store.activeFile(ModelKind.LLM)
+        if (file == null) {
+            freeLocked()
+            return@withLock false
+        }
+        if (handle != 0L && loadedPath != file.absolutePath) freeLocked()
+        if (handle == 0L) {
             handle = withContext(Dispatchers.Default) {
-                LlamaBridge.load(store.llmFile.absolutePath, 4096, prefs.threads)
+                LlamaBridge.load(file.absolutePath, 4096, prefs.threads)
             }
+            if (handle != 0L) loadedPath = file.absolutePath
         }
         handle != 0L
     }
 
-    suspend fun unload() = loadLock.withLock {
+    suspend fun unload() = loadLock.withLock { freeLocked() }
+
+    private suspend fun freeLocked() {
         if (handle != 0L) {
             LlamaBridge.stop(handle)
-            runLock.withLock { LlamaBridge.free(handle); handle = 0L }
+            runLock.withLock { LlamaBridge.free(handle); handle = 0L; loadedPath = null }
         }
     }
 
