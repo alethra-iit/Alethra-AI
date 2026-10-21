@@ -30,6 +30,16 @@ class Prefs(ctx: Context) {
         get() = sp.getBoolean("speak", true)
         set(v) = sp.edit().putBoolean("speak", v).apply()
 
+    /** Floating assistant: langsung masuk mode ngobrol bebas tangan saat dibuka. */
+    var autoHandsFree: Boolean
+        get() = sp.getBoolean("auto_hands_free", false)
+        set(v) = sp.edit().putBoolean("auto_hands_free", v).apply()
+
+    /** Mode bebas tangan: pengguna boleh memotong suara AI dengan berbicara. */
+    var bargeIn: Boolean
+        get() = sp.getBoolean("barge_in", true)
+        set(v) = sp.edit().putBoolean("barge_in", v).apply()
+
     /** Mode tampilan (0 = ikuti sistem, 1 = terang, 2 = gelap). Default gelap seperti sebelumnya. */
     var themeMode by mutableIntStateOf(sp.getInt("theme_mode", 2))
         private set

@@ -44,7 +44,7 @@ class WhisperEngine(private val store: ModelStore, private val prefs: Prefs) {
     }
 }
 
-/** Merekam mikrofon 16 kHz mono; berhenti otomatis setelah jeda bicara ~1,5 detik. */
+/** Merekam mikrofon 16 kHz mono; berhenti otomatis setelah jeda bicara ~0,9 detik. */
 object Recorder {
     private const val SR = 16000
 
@@ -84,7 +84,7 @@ object Recorder {
                         speech -> silentMs += 100
                         else -> waitedMs += 100
                     }
-                    if (speech && silentMs >= 1500) break
+                    if (speech && silentMs >= 900) break
                     if (!speech && waitedMs >= 7000) break
                 }
             } finally {

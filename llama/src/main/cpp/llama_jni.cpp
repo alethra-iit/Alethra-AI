@@ -13,6 +13,8 @@ struct Handle {
     llama_model *model = nullptr;
     llama_context *ctx = nullptr;
     std::atomic<bool> stop{false};
+    // Token yang saat ini ada di KV cache (urutan 0). Dipakai untuk melewati prefill prefix yang sama.
+    std::vector<llama_token> cached;
 };
 
 // Panjang prefix string yang berisi karakter UTF-8 utuh (token bisa memotong karakter multibyte).
@@ -117,7 +119,23 @@ Java_com_alethra_ai_llama_LlamaBridge_generate(JNIEnv *env, jobject, jlong handl
     if (nTok >= nCtx - 16) return -3;
     maxTokens = std::min<int>(maxTokens, nCtx - nTok);
 
-    llama_memory_clear(llama_get_memory(h->ctx), true);
+    // Pakai ulang KV cache: hanya token setelah prefix yang sama dengan giliran sebelumnya yang di-decode.
+    // Riwayat chat hampir selalu diawali sama, jadi waktu menunggu kata pertama jauh berkurang.
+    llama_memory_t mem = llama_get_memory(h->ctx);
+    size_t common = 0;
+    {
+        const size_t lim = std::min(h->cached.size(), toks.size() - 1);  // sisakan >= 1 token untuk di-decode (butuh logits)
+        while (common < lim && h->cached[common] == toks[common]) common++;
+    }
+    if (common > 0) {
+        if (!llama_memory_seq_rm(mem, 0, (llama_pos) common, -1)) {  // sebagian tipe cache tidak bisa dipangkas
+            llama_memory_clear(mem, true);
+            common = 0;
+        }
+    } else {
+        llama_memory_clear(mem, true);
+    }
+    h->cached.assign(toks.begin(), toks.begin() + common);
 
     llama_sampler *smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
     llama_sampler_chain_add(smpl, llama_sampler_init_penalties(64, 1.1f, 0.0f, 0.0f));
@@ -139,10 +157,16 @@ Java_com_alethra_ai_llama_LlamaBridge_generate(JNIEnv *env, jobject, jlong handl
     };
 
     const int nBatch = 512;
-    for (int i = 0; i < nTok; i += nBatch) {
+    for (int i = (int) common; i < nTok; i += nBatch) {
         int c = std::min(nBatch, nTok - i);
         llama_batch b = llama_batch_get_one(toks.data() + i, c);
-        if (llama_decode(h->ctx, b) != 0) { llama_sampler_free(smpl); return -4; }
+        if (llama_decode(h->ctx, b) != 0) {
+            h->cached.clear();
+            llama_memory_clear(mem, true);
+            llama_sampler_free(smpl);
+            return -4;
+        }
+        h->cached.insert(h->cached.end(), toks.begin() + i, toks.begin() + i + c);
         if (h->stop) { llama_sampler_free(smpl); return 0; }
     }
 
@@ -163,7 +187,12 @@ Java_com_alethra_ai_llama_LlamaBridge_generate(JNIEnv *env, jobject, jlong handl
         }
         produced++;
         llama_batch b = llama_batch_get_one(&t, 1);
-        if (llama_decode(h->ctx, b) != 0) break;
+        if (llama_decode(h->ctx, b) != 0) {
+            h->cached.clear();
+            llama_memory_clear(mem, true);
+            break;
+        }
+        h->cached.push_back(t);
     }
     if (!pending.empty() && keepGoing) emit(pending);
 

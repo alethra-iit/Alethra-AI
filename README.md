@@ -65,3 +65,21 @@ Ketuk gelembung untuk membuka panel; seret untuk memindahkan.
   API llama.cpp sering berubah; bila ganti versi, sesuaikan `llama/src/main/cpp/llama_jni.cpp`.
 - `llama.cpp` dan `whisper.cpp` masing-masing membawa ggml sendiri, jadi dipisah ke modul `:llama` dan `:whisper`.
 - Flag CPU `-march=armv8.2-a+dotprod+fp16` (di `CMakeLists.txt`) mengasumsikan SoC modern (hampir semua perangkat 12 GB RAM).
+
+## Percakapan real-time (streaming)
+- **Auto speech streaming**: jawaban dibacakan *selagi* AI menulis. `TtsManager` memecah teks per kalimat/klausa (`beginStream` → `feed` → `endStream`) dan memutarnya berurutan, jadi suara mulai setelah kalimat pertama selesai.
+- **KV cache dipakai ulang** (`llama_jni.cpp`): hanya token baru yang diproses tiap giliran, bukan seluruh riwayat dari awal.
+- **Prompt gaya ngobrol**: balasan pendek, santai, tanpa markdown/emoji (karena dibacakan). `maxTokens` 400.
+- **Model dimuat di awal** saat layar chat dibuka; jeda diam perekaman 0,9 detik.
+
+## Mode ngobrol bebas tangan (floating assistant)
+Nyalakan lewat ikon telinga di panel floating, atau Pengaturan → Floating assistant → *Mode bebas tangan otomatis*.
+- **Loop otomatis**: dengarkan → transkripsi → AI menjawab (dibacakan sambil menulis) → dengarkan lagi, tanpa menekan tombol. Ketuk tombol Stop untuk mengakhiri.
+- **Potong suara AI (barge-in)**: saat AI berpikir atau berbicara, mikrofon dipantau. Begitu Anda mulai bicara, suara AI dan generasi teks berhenti, lalu ucapan Anda direkam (0,8 detik audio sebelum terdeteksi ikut terbawa agar awal kalimat tidak hilang). Bisa dimatikan di Pengaturan.
+- Mikrofon memakai `VOICE_COMMUNICATION` + peredam gema (AEC) bila perangkat mendukung. Headset paling andal; di speaker keras, gema bisa memicu pemotongan sendiri. Ambang ada di `respondWithBargeIn` (`FloatingService.kt`, 0,05 saat AI berbicara) dan `VoiceSession.kt`.
+- Berhenti sendiri bila ada error (mikrofon, model belum terpasang).
+
+## Lingkaran floating (mode minimize)
+- Tombol **Kecilkan** di panel menyisakan hanya lingkaran, tanpa kotak. Menyalakan mode bebas tangan dari panel otomatis mengecilkannya.
+- Saat pengguna atau AI berbicara, ikon berubah menjadi **mikrofon dengan gelombang** di sekelilingnya: warna utama = pengguna (gelombang mengikuti kerasnya suara), warna kedua = AI berbicara. Saat AI berpikir tampil indikator putar.
+- Ketuk lingkaran = buka panel, tahan lama = akhiri mode bebas tangan, seret = pindahkan. Parameter animasi ada di `Bubble`/`Waves` (`FloatingService.kt`).

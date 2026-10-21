@@ -19,9 +19,12 @@ class Assistant(
     val error = MutableStateFlow<String?>(null)
 
     private val systemPrompt =
-        "Kamu adalah Alethra, asisten AI pribadi yang berjalan sepenuhnya offline di perangkat pengguna. " +
-        "Jawablah dalam bahasa Indonesia yang jelas, ringkas, dan ramah, kecuali pengguna memakai bahasa lain. " +
-        "Jika tidak tahu, katakan terus terang."
+        "Kamu adalah Alethra, teman ngobrol pribadi yang berjalan offline di perangkat pengguna. " +
+        "Ngobrollah santai dan natural seperti teman dekat, dalam bahasa Indonesia sehari-hari (kecuali pengguna memakai bahasa lain). " +
+        "Balas singkat: biasanya 1 sampai 3 kalimat pendek, langsung ke inti, tanpa kalimat pembuka basa-basi. " +
+        "Jangan memakai markdown, daftar, tabel, simbol, atau emoji, karena balasanmu dibacakan dengan suara. " +
+        "Tanggapi perasaan dan konteks pengguna; sesekali boleh berkomentar atau bertanya balik agar obrolan mengalir, tapi jangan di setiap balasan. " +
+        "Beri jawaban panjang hanya bila diminta. Jika tidak tahu, katakan terus terang."
 
     suspend fun newConversation(): Long =
         dao.insertConversation(ConversationEntity(title = "Percakapan baru", updatedAt = System.currentTimeMillis()))
@@ -32,6 +35,20 @@ class Assistant(
             status.value = Status.Listening
             val pcm = Recorder.record(shouldStop = shouldStop)
             if (pcm.isEmpty()) return ""
+            return transcribe(pcm)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            error.value = e.message ?: "Gagal merekam suara"
+            return ""
+        } finally {
+            status.value = Status.Idle
+        }
+    }
+
+    /** Ubah rekaman (16 kHz mono) menjadi teks. Mengembalikan "" bila gagal (pesan ada di [error]). */
+    suspend fun transcribe(pcm: FloatArray): String {
+        try {
             status.value = Status.Transcribing
             if (!whisper.ensureLoaded()) {
                 error.value = "Belum ada model suara. Buka Pengaturan → Model suara untuk mengunduh atau mengimpor."
@@ -41,7 +58,7 @@ class Assistant(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            error.value = e.message ?: "Gagal merekam suara"
+            error.value = e.message ?: "Gagal mengubah suara ke teks"
             return ""
         } finally {
             status.value = Status.Idle
@@ -72,8 +89,16 @@ class Assistant(
                 return ""
             }
             status.value = Status.Thinking
-            llama.generate(history).collect { sb.append(it); onPartial(sb.toString()) }
+            // Streaming: setiap potongan teks langsung diteruskan ke TTS (dibacakan per kalimat),
+            // jadi suara mulai saat kalimat pertama selesai, bukan setelah seluruh jawaban selesai.
+            if (speak) tts.beginStream()
+            llama.generate(history, maxTokens = 400).collect {
+                sb.append(it)
+                onPartial(sb.toString())
+                if (speak) tts.feed(it)
+            }
         } catch (e: CancellationException) {
+            tts.stop()
             throw e
         } catch (e: Exception) {
             error.value = e.message ?: "Terjadi kesalahan"
@@ -86,7 +111,7 @@ class Assistant(
                 status.value = Status.Idle
             }
         }
-        if (speak && sb.isNotBlank()) tts.speak(sb.toString())
+        if (speak) tts.endStream()   // bacakan sisa kalimat terakhir
         return sb.toString()
     }
 }

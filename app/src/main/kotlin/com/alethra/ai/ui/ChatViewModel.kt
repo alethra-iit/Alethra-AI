@@ -31,6 +31,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private var job: Job? = null
     private var stopListening = false
 
+    init {
+        // Muat model bahasa di latar belakang begitu layar chat dibuka, agar balasan pertama tidak menunggu loading.
+        viewModelScope.launch { runCatching { assistant.llama.ensureLoaded() } }
+    }
+
     private suspend fun runTurn(text: String, speak: Boolean) {
         val id = currentId.value ?: assistant.newConversation().also { currentId.value = it }
         streaming.value = ""

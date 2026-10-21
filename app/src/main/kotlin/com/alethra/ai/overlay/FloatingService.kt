@@ -8,6 +8,8 @@ import android.graphics.PixelFormat
 import android.os.IBinder
 import android.view.Gravity
 import android.view.WindowManager
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -27,6 +29,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.unit.dp
@@ -40,6 +43,7 @@ import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.alethra.ai.AlethraApp
 import com.alethra.ai.ai.Status
+import com.alethra.ai.ai.VoiceSession
 import com.alethra.ai.ui.AlethraTheme
 import com.alethra.ai.ui.MainActivity
 import kotlinx.coroutines.*
@@ -75,6 +79,8 @@ class FloatingService : Service(), LifecycleOwner, SavedStateRegistryOwner, View
     private var convId: Long? = null
     private var job: Job? = null
     private var stopListening = false
+    private var handsFree by mutableStateOf(false)
+    private var micLevel by mutableFloatStateOf(0f)   // level suara mikrofon (RMS) untuk animasi gelombang
     private var bubbleX = 0
     private var bubbleY = 400
 
@@ -94,7 +100,10 @@ class FloatingService : Service(), LifecycleOwner, SavedStateRegistryOwner, View
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) { stopSelf(); return START_NOT_STICKY }
         ServiceCompat.startForeground(this, 1, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-        if (view == null) addOverlay()
+        if (view == null) {
+            addOverlay()
+            if ((application as AlethraApp).prefs.autoHandsFree) setHandsFree(true)
+        }
         return START_STICKY
     }
 
@@ -178,21 +187,114 @@ class FloatingService : Service(), LifecycleOwner, SavedStateRegistryOwner, View
         }
     }
 
+    /** Nyalakan/matikan mode ngobrol bebas tangan (mikrofon terus aktif selama mode ini menyala). */
+    private fun setHandsFree(on: Boolean) {
+        if (on == handsFree) return
+        cancelAll()
+        handsFree = on
+        if (on) runHandsFree()
+    }
+
+    /**
+     * Loop percakapan: dengarkan → transkripsi → AI menjawab (dibacakan sambil menulis) → dengarkan lagi.
+     * Selama AI berpikir/berbicara, mikrofon dipantau; bila pengguna mulai bicara, suara AI dipotong
+     * dan ucapan pengguna langsung direkam (audio pembukanya ikut terbawa).
+     */
+    private fun runHandsFree() {
+        stopListening = false
+        job = scope.launch {
+            val prefs = (application as AlethraApp).prefs
+            val vs = VoiceSession { micLevel = it }
+            try {
+                vs.start()
+                var carry: FloatArray? = null
+                while (isActive && handsFree) {
+                    assistant.status.value = Status.Listening
+                    val pcm = try {
+                        vs.listenUtterance(preRoll = carry)
+                    } finally {
+                        assistant.status.value = Status.Idle
+                    }
+                    carry = null
+                    if (pcm.isEmpty()) continue                       // tidak ada ucapan: dengarkan lagi
+                    val text = assistant.transcribe(pcm)
+                    if (assistant.error.value != null) break
+                    if (text.length < 2) continue                     // derau / halusinasi pendek
+                    val id = convId ?: assistant.newConversation().also { convId = it }
+                    reply = ""
+                    carry = respondWithBargeIn(vs, id, text, prefs.bargeIn)
+                    if (assistant.error.value != null) break
+                    if (carry == null) delay(300)                     // beri waktu gema speaker mereda
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                reply = e.message ?: "Mode bebas tangan berhenti"
+            } finally {
+                vs.close()
+                micLevel = 0f
+                assistant.status.value = Status.Idle
+            }
+            // Sampai di sini hanya bila loop berhenti sendiri (error), bukan karena dimatikan pengguna.
+            assistant.error.value?.let { reply = it; assistant.error.value = null }
+            handsFree = false
+        }
+    }
+
+    /** Jalankan satu jawaban AI; kembalikan audio awal ucapan pengguna bila AI dipotong, selain itu null. */
+    private suspend fun respondWithBargeIn(vs: VoiceSession, convId: Long, text: String, bargeIn: Boolean): FloatArray? {
+        var pre: FloatArray? = null
+        coroutineScope {
+            val replyJob = launch {
+                assistant.ask(convId, text, true) { reply = it }
+                assistant.tts.awaitDone()
+            }
+            val bargeJob = if (!bargeIn) null else launch {
+                // Ambang lebih tinggi saat suara AI keluar dari speaker, agar gemanya tidak memicu pemotongan.
+                val p = vs.waitForBargeIn { if (assistant.tts.isSpeaking) 0.05f else 0.02f }
+                if (p != null) { pre = p; replyJob.cancel() }
+            }
+            replyJob.join()
+            bargeJob?.cancel()
+        }
+        return pre
+    }
+
     private fun cancelAll() { stopListening = true; assistant.tts.stop(); job?.cancel() }
 
     @Composable
     private fun Overlay() {
         val status by assistant.status.collectAsState()
-        if (!expanded) Bubble(status) else Panel(status)
+        val speaking by assistant.tts.speaking.collectAsState()
+        if (!expanded) Bubble(status, speaking) else Panel(status, speaking)
     }
 
+    private enum class Wave { None, User, Ai }
+
+    /**
+     * Lingkaran floating (tanpa kotak). Saat pengguna atau AI berbicara, ikonnya menjadi mikrofon dengan
+     * gelombang di sekelilingnya: warna utama = pengguna (mengikuti kerasnya suara), warna kedua = AI berbicara.
+     * Ketuk = buka panel, tahan lama = akhiri mode bebas tangan, seret = pindahkan.
+     */
     @Composable
-    private fun Bubble(status: Status) {
+    private fun Bubble(status: Status, speaking: Boolean) {
+        val busy = (status == Status.Thinking || status == Status.Loading || status == Status.Transcribing) && !speaking
+        val wave = when {
+            speaking -> Wave.Ai
+            status == Status.Listening || (handsFree && !busy) -> Wave.User
+            else -> Wave.None
+        }
+        val cs = MaterialTheme.colorScheme
+        // User: ikuti level mikrofon (listen manual tanpa level -> gelombang sedang). AI: gelombang penuh.
+        val target = when (wave) {
+            Wave.Ai -> 1f
+            Wave.User -> if (handsFree) (micLevel * 9f).coerceIn(0.12f, 1f) else 0.7f
+            Wave.None -> 0f
+        }
+        val amp by animateFloatAsState(target, tween(120), label = "amp")
+
         Box(
-            Modifier.size(58.dp)
-                .shadow(8.dp, CircleShape)
-                .clip(CircleShape)
-                .background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary)))
+            Modifier.size(88.dp)
                 .pointerInput(Unit) {
                     detectDragGestures { change, drag ->
                         change.consume()
@@ -200,16 +302,51 @@ class FloatingService : Service(), LifecycleOwner, SavedStateRegistryOwner, View
                         view?.let { wm.updateViewLayout(it, lp) }
                     }
                 }
-                .pointerInput(Unit) { detectTapGestures(onTap = { applyExpanded(true) }) },
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { applyExpanded(true) },
+                        onLongPress = { if (handsFree) setHandsFree(false) }
+                    )
+                },
             contentAlignment = Alignment.Center
         ) {
-            if (status == Status.Idle) Icon(Icons.Default.AutoAwesome, null, tint = Color.White)
-            else CircularProgressIndicator(Modifier.size(26.dp), color = Color.White, strokeWidth = 3.dp)
+            if (wave != Wave.None) Waves(if (wave == Wave.Ai) cs.secondary else cs.primary, amp, Modifier.fillMaxSize())
+            Box(
+                Modifier.size(56.dp)
+                    .shadow(8.dp, CircleShape)
+                    .clip(CircleShape)
+                    .background(Brush.linearGradient(listOf(cs.primary, cs.secondary))),
+                contentAlignment = Alignment.Center
+            ) {
+                when {
+                    busy -> CircularProgressIndicator(Modifier.size(26.dp), color = Color.White, strokeWidth = 3.dp)
+                    wave != Wave.None || handsFree -> Icon(Icons.Default.Mic, "Mikrofon", tint = Color.White, modifier = Modifier.size(28.dp))
+                    else -> Icon(Icons.Default.AutoAwesome, null, tint = Color.White)
+                }
+            }
+        }
+    }
+
+    /** Tiga cincin yang memancar keluar dari tepi lingkaran; [amp] (0..1) mengatur jarak dan kejelasan. */
+    @Composable
+    private fun Waves(color: Color, amp: Float, modifier: Modifier) {
+        val phase by rememberInfiniteTransition(label = "wave").animateFloat(
+            0f, 1f, infiniteRepeatable(tween(1500, easing = LinearEasing)), label = "phase"
+        )
+        Canvas(modifier) {
+            val base = 28.dp.toPx()                       // jari-jari lingkaran
+            val maxR = size.minDimension / 2f
+            for (i in 0 until 3) {
+                val p = (phase + i / 3f) % 1f
+                val r = base + (maxR - base) * p * amp.coerceIn(0.15f, 1f)
+                val a = (1f - p) * 0.6f * amp.coerceIn(0.25f, 1f)
+                drawCircle(color.copy(alpha = a), r, center, style = Stroke(width = 3.dp.toPx()))
+            }
         }
     }
 
     @Composable
-    private fun Panel(status: Status) {
+    private fun Panel(status: Status, speaking: Boolean) {
         var input by remember { mutableStateOf("") }
         Surface(
             Modifier.shadow(12.dp, RoundedCornerShape(24.dp)),
@@ -218,29 +355,45 @@ class FloatingService : Service(), LifecycleOwner, SavedStateRegistryOwner, View
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Alethra AI", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                    IconButton({ applyExpanded(false) }) { Icon(Icons.Default.KeyboardArrowDown, "Kecilkan") }
+                    IconButton({
+                        setHandsFree(!handsFree)
+                        if (handsFree) applyExpanded(false)   // mode bebas tangan menyala -> sisakan lingkaran saja
+                    }) {
+                        Icon(
+                            Icons.Default.Hearing, if (handsFree) "Matikan mode bebas tangan" else "Nyalakan mode bebas tangan",
+                            tint = if (handsFree) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TextButton({ applyExpanded(false) }) {
+                        Icon(Icons.Default.KeyboardArrowDown, null)
+                        Text("Kecilkan")
+                    }
                     IconButton({ cancelAll(); stopSelf() }) { Icon(Icons.Default.Close, "Tutup") }
                 }
                 Box(Modifier.heightIn(min = 60.dp, max = 240.dp).verticalScroll(rememberScrollState())) {
                     Text(
-                        reply.ifEmpty { "Ketuk mikrofon dan bicara, atau ketik pertanyaan Anda." },
+                        reply.ifEmpty {
+                            if (handsFree) "Mode bebas tangan aktif. Silakan bicara kapan saja."
+                            else "Ketuk mikrofon dan bicara, atau ketik pertanyaan Anda. Ikon telinga = mode ngobrol bebas tangan."
+                        },
                         color = if (reply.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
                     )
                 }
                 Text(
-                    when (status) {
-                        Status.Idle -> ""
-                        Status.Loading -> "Memuat model…"
-                        Status.Listening -> "Mendengarkan…"
-                        Status.Transcribing -> "Mengubah suara ke teks…"
-                        Status.Thinking -> "Berpikir…"
+                    when {
+                        status == Status.Loading -> "Memuat model…"
+                        status == Status.Transcribing -> "Mengubah suara ke teks…"
+                        status == Status.Thinking && !speaking -> "Berpikir…"
+                        speaking -> if (handsFree) "Berbicara… (bicara untuk memotong)" else "Berbicara…"
+                        status == Status.Listening -> "Mendengarkan…"
+                        else -> ""
                     },
                     color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.labelMedium
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextField(
                         input, { input = it }, Modifier.weight(1f), placeholder = { Text("Tulis pesan…") },
-                        singleLine = true, shape = RoundedCornerShape(24.dp),
+                        singleLine = true, shape = RoundedCornerShape(24.dp), enabled = !handsFree,
                         colors = TextFieldDefaults.colors(
                             focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
                             focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -249,6 +402,8 @@ class FloatingService : Service(), LifecycleOwner, SavedStateRegistryOwner, View
                     )
                     Spacer(Modifier.width(8.dp))
                     when {
+                        handsFree ->
+                            FilledIconButton({ setHandsFree(false) }) { Icon(Icons.Default.Stop, "Akhiri mode bebas tangan") }
                         status == Status.Thinking || status == Status.Loading || status == Status.Transcribing ->
                             FilledIconButton({ cancelAll() }) { Icon(Icons.Default.Stop, "Berhenti") }
                         input.isNotBlank() ->
@@ -265,6 +420,7 @@ class FloatingService : Service(), LifecycleOwner, SavedStateRegistryOwner, View
 
     override fun onDestroy() {
         scope.cancel()
+        assistant.tts.stop()
         view?.let { wm.removeView(it) }
         view = null
         registry.currentState = Lifecycle.State.DESTROYED

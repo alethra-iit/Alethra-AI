@@ -52,6 +52,8 @@ fun SettingsScreen(onBack: () -> Unit, requestMic: (() -> Unit) -> Unit) {
     var sttList by remember { mutableStateOf(app.store.installed(ModelKind.STT)) }
     var picker by remember { mutableStateOf<ModelKind?>(null) }
     var speak by remember { mutableStateOf(app.prefs.speakReplies) }
+    var autoHf by remember { mutableStateOf(app.prefs.autoHandsFree) }
+    var barge by remember { mutableStateOf(app.prefs.bargeIn) }
     val floating by FloatingService.running.collectAsState()
 
     // Unduh/impor berjalan di TransferManager + DownloadService, jadi tetap lanjut walau layar ini
@@ -238,6 +240,13 @@ fun SettingsScreen(onBack: () -> Unit, requestMic: (() -> Unit) -> Unit) {
                         FloatingService.start(ctx)
                     }
                 }
+            }
+
+            SwitchRow("Mode bebas tangan otomatis", "Saat floating dibuka, AI langsung mendengarkan dan membalas bergantian tanpa menekan tombol. Bisa juga dinyalakan dari ikon telinga di panel.", autoHf) {
+                autoHf = it; app.prefs.autoHandsFree = it
+            }
+            SwitchRow("Potong suara AI saat saya bicara", "Di mode bebas tangan, suara AI berhenti begitu Anda mulai berbicara. Matikan bila speaker membuat AI terpotong sendiri (atau pakai headset).", barge) {
+                barge = it; app.prefs.bargeIn = it
             }
 
             Text(
