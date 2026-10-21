@@ -102,7 +102,7 @@ class FloatingService : Service(), LifecycleOwner, SavedStateRegistryOwner, View
         ServiceCompat.startForeground(this, 1, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
         if (view == null) {
             addOverlay()
-            if ((application as AlethraApp).prefs.autoHandsFree) setHandsFree(true)
+            if ((application as AlethraApp).prefs.autoHandsFree) switchHandsFree(true)
         }
         return START_STICKY
     }
@@ -188,7 +188,7 @@ class FloatingService : Service(), LifecycleOwner, SavedStateRegistryOwner, View
     }
 
     /** Nyalakan/matikan mode ngobrol bebas tangan (mikrofon terus aktif selama mode ini menyala). */
-    private fun setHandsFree(on: Boolean) {
+    private fun switchHandsFree(on: Boolean) {
         if (on == handsFree) return
         cancelAll()
         handsFree = on
@@ -305,7 +305,7 @@ class FloatingService : Service(), LifecycleOwner, SavedStateRegistryOwner, View
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = { applyExpanded(true) },
-                        onLongPress = { if (handsFree) setHandsFree(false) }
+                        onLongPress = { if (handsFree) switchHandsFree(false) }
                     )
                 },
             contentAlignment = Alignment.Center
@@ -356,7 +356,7 @@ class FloatingService : Service(), LifecycleOwner, SavedStateRegistryOwner, View
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Alethra AI", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                     IconButton({
-                        setHandsFree(!handsFree)
+                        switchHandsFree(!handsFree)
                         if (handsFree) applyExpanded(false)   // mode bebas tangan menyala -> sisakan lingkaran saja
                     }) {
                         Icon(
@@ -403,7 +403,7 @@ class FloatingService : Service(), LifecycleOwner, SavedStateRegistryOwner, View
                     Spacer(Modifier.width(8.dp))
                     when {
                         handsFree ->
-                            FilledIconButton({ setHandsFree(false) }) { Icon(Icons.Default.Stop, "Akhiri mode bebas tangan") }
+                            FilledIconButton({ switchHandsFree(false) }) { Icon(Icons.Default.Stop, "Akhiri mode bebas tangan") }
                         status == Status.Thinking || status == Status.Loading || status == Status.Transcribing ->
                             FilledIconButton({ cancelAll() }) { Icon(Icons.Default.Stop, "Berhenti") }
                         input.isNotBlank() ->
