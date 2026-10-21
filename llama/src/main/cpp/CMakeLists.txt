@@ -17,7 +17,7 @@ set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
 
 if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/llama.cpp/CMakeLists.txt)
-  message(FATAL_ERROR "llama.cpp belum ada. Jalankan: ./scripts/fetch-native.sh")
+  message(FATAL_ERROR "llama.cpp belum ada. Jalankan: bash scripts/fetch-native.sh")
 endif()
 add_subdirectory(llama.cpp llama_build)
 

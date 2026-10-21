@@ -16,7 +16,7 @@ Package: `com.alethra.ai` · Target: Android 8.0+ (API 26), arm64, RAM 12 GB.
 
 ## Build lokal
 ```bash
-./scripts/fetch-native.sh          # unduh llama.cpp & whisper.cpp (versi di dalam skrip)
+bash scripts/fetch-native.sh          # unduh llama.cpp & whisper.cpp (versi di dalam skrip)
 gradle wrapper --gradle-version 8.9  # sekali saja, jika ingin ./gradlew
 ./gradlew :app:assembleDebug
 ```

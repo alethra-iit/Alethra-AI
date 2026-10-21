@@ -28,7 +28,7 @@ jobs:
           "$SDKM" "platforms;android-34" "build-tools;34.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
 
       - name: Fetch llama.cpp & whisper.cpp
-        run: ./scripts/fetch-native.sh
+        run: bash scripts/fetch-native.sh
 
       - uses: gradle/actions/setup-gradle@v4
         with:

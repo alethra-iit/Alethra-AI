@@ -13,7 +13,7 @@ set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_SERVER OFF CACHE BOOL "" FORCE)
 
 if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/whisper.cpp/CMakeLists.txt)
-  message(FATAL_ERROR "whisper.cpp belum ada. Jalankan: ./scripts/fetch-native.sh")
+  message(FATAL_ERROR "whisper.cpp belum ada. Jalankan: bash scripts/fetch-native.sh")
 endif()
 add_subdirectory(whisper.cpp whisper_build)
 
