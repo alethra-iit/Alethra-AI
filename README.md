@@ -43,4 +43,4 @@ Ketuk gelembung untuk membuka panel; seret untuk memindahkan.
 - Versi `llama.cpp` / `whisper.cpp` dipin lewat variabel `LLAMA_CPP_REF` / `WHISPER_CPP_REF` (skrip & workflow).
   API llama.cpp sering berubah; bila ganti versi, sesuaikan `llama/src/main/cpp/llama_jni.cpp`.
 - `llama.cpp` dan `whisper.cpp` masing-masing membawa ggml sendiri, jadi dipisah ke modul `:llama` dan `:whisper`.
-- Flag CPU `armv8.2-a+dotprod+fp16` mengasumsikan SoC modern (hampir semua perangkat 12 GB RAM).
+- Flag CPU `-march=armv8.2-a+dotprod+fp16` (di `CMakeLists.txt`) mengasumsikan SoC modern (hampir semua perangkat 12 GB RAM).

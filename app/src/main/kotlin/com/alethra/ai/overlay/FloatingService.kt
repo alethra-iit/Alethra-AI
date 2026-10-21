@@ -137,7 +137,7 @@ class FloatingService : Service(), LifecycleOwner, SavedStateRegistryOwner, View
         view = v
     }
 
-    private fun setExpanded(e: Boolean) {
+    private fun applyExpanded(e: Boolean) {
         val v = view ?: return
         if (e) {
             bubbleX = lp.x; bubbleY = lp.y
@@ -202,7 +202,7 @@ class FloatingService : Service(), LifecycleOwner, SavedStateRegistryOwner, View
                         view?.let { wm.updateViewLayout(it, lp) }
                     }
                 }
-                .pointerInput(Unit) { detectTapGestures(onTap = { setExpanded(true) }) },
+                .pointerInput(Unit) { detectTapGestures(onTap = { applyExpanded(true) }) },
             contentAlignment = Alignment.Center
         ) {
             if (status == Status.Idle) Icon(Icons.Default.AutoAwesome, null, tint = Color.White)
@@ -220,7 +220,7 @@ class FloatingService : Service(), LifecycleOwner, SavedStateRegistryOwner, View
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Alethra AI", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                    IconButton({ setExpanded(false) }) { Icon(Icons.Default.KeyboardArrowDown, "Kecilkan") }
+                    IconButton({ applyExpanded(false) }) { Icon(Icons.Default.KeyboardArrowDown, "Kecilkan") }
                     IconButton({ cancelAll(); stopSelf() }) { Icon(Icons.Default.Close, "Tutup") }
                 }
                 Box(Modifier.heightIn(min = 60.dp, max = 240.dp).verticalScroll(rememberScrollState())) {
