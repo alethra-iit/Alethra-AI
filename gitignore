@@ -1,0 +1,10 @@
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+.cxx/
+llama/src/main/cpp/llama.cpp/
+whisper/src/main/cpp/whisper.cpp/
+*.gguf
+*.bin
